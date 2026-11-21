@@ -1,4 +1,4 @@
-import Foundation
+import UIKit
 
 struct BlockerSettings {
     var hideExplore: Bool
@@ -19,8 +19,15 @@ enum Platform: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .instagram: return "camera"
-        case .youtube: return "play.rectangle"
+        case .instagram: return "camera.fill"
+        case .youtube: return "play.rectangle.fill"
+        }
+    }
+
+    var uiTint: UIColor {
+        switch self {
+        case .instagram: return .systemPink
+        case .youtube: return .systemRed
         }
     }
 
@@ -38,7 +45,10 @@ enum Platform: String, CaseIterable, Identifiable {
         case .instagram:
             guard url.host?.contains("instagram.com") == true else { return nil }
             if path.hasPrefix("/reels") { return homeURL }
-            if settings.hideExplore && path.hasPrefix("/explore") { return homeURL }
+            // The Explore grid lives at exactly /explore/. Send it to plain search instead.
+            if settings.hideExplore && (path == "/explore" || path == "/explore/") {
+                return URL(string: "https://www.instagram.com/explore/search/")
+            }
             return nil
 
         case .youtube:
@@ -68,20 +78,28 @@ enum Platform: String, CaseIterable, Identifiable {
     private static func instagramJS(hideExplore: Bool) -> String {
         #"""
         var HIDE_EXPLORE = \#(hideExplore);
-        var CSS = 'a[href^="/reels"]{display:none!important}' +
-                  (HIDE_EXPLORE ? 'a[href^="/explore"]{display:none!important}' : '');
+        // *= also catches absolute links like https://www.instagram.com/reels/
+        var CSS = 'a[href*="/reels"]{display:none!important}';
 
         function redirect() {
           var p = location.pathname;
           // "/reels/..." is the endless feed. "/reel/ID" (a single shared reel) is allowed.
-          if (p.indexOf('/reels') === 0 || (HIDE_EXPLORE && p.indexOf('/explore') === 0)) {
-            location.replace('/');
+          if (p.indexOf('/reels') === 0) { location.replace('/'); return true; }
+          // The Explore grid is exactly /explore/. Search (/explore/search/) stays usable.
+          if (HIDE_EXPLORE && (p === '/explore' || p === '/explore/')) {
+            location.replace('/explore/search/');
             return true;
           }
           return false;
         }
 
-        function sweep() {}
+        // On the search page, hide any suggested-post grid so only search results show.
+        function sweep() {
+          if (!HIDE_EXPLORE || location.pathname.indexOf('/explore/') !== 0) return;
+          document.querySelectorAll('main a[href*="/p/"], main a[href*="/reel/"]').forEach(function (a) {
+            a.style.setProperty('display', 'none', 'important');
+          });
+        }
         """#
     }
 
@@ -157,6 +175,9 @@ enum Platform: String, CaseIterable, Identifiable {
 
           // Re-check whenever the page adds new content (infinite scroll, tab switches).
           new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+
+          // Safety net in case a navigation slips past the hooks above.
+          setInterval(schedule, 700);
 
           run();
         })();
