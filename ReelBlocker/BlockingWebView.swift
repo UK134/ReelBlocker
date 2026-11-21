@@ -35,6 +35,25 @@ struct BlockingWebView: UIViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.allowsBackForwardNavigationGestures = true  // swipe to go back
+        // No white flash while pages load (matches light/dark mode).
+        webView.isOpaque = false
+        webView.backgroundColor = .systemBackground
+        webView.scrollView.backgroundColor = .systemBackground
+
+        // Thin loading bar along the top edge.
+        let progress = UIProgressView(progressViewStyle: .bar)
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        progress.trackTintColor = .clear
+        progress.progressTintColor = platform.uiTint
+        progress.alpha = 0
+        webView.addSubview(progress)
+        NSLayoutConstraint.activate([
+            progress.topAnchor.constraint(equalTo: webView.topAnchor),
+            progress.leadingAnchor.constraint(equalTo: webView.leadingAnchor),
+            progress.trailingAnchor.constraint(equalTo: webView.trailingAnchor),
+            progress.heightAnchor.constraint(equalToConstant: 2.5)
+        ])
+        context.coordinator.observeProgress(of: webView, bar: progress)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
 
@@ -53,6 +72,26 @@ struct BlockingWebView: UIViewRepresentable {
         let platform: Platform
         let settings: BlockerSettings
         weak var webView: WKWebView?
+        private var progressObservation: NSKeyValueObservation?
+
+        func observeProgress(of webView: WKWebView, bar: UIProgressView) {
+            progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { webView, _ in
+                let value = Float(webView.estimatedProgress)
+                DispatchQueue.main.async {
+                    if value < 1 {
+                        bar.alpha = 1
+                        bar.setProgress(value, animated: true)
+                    } else {
+                        bar.setProgress(1, animated: true)
+                        UIView.animate(withDuration: 0.3, delay: 0.2, options: [], animations: {
+                            bar.alpha = 0
+                        }, completion: { _ in
+                            bar.setProgress(0, animated: false)
+                        })
+                    }
+                }
+            }
+        }
 
         init(platform: Platform, settings: BlockerSettings) {
             self.platform = platform
