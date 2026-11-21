@@ -13,6 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate app icon
+        run: |
+          python3 -m pip install --quiet pillow || python3 -m pip install --quiet --break-system-packages pillow
+          ICON=ReelBlocker/Assets.xcassets/AppIcon.appiconset
+          mkdir -p "$ICON"
+          echo '{"info":{"author":"xcode","version":1}}' > ReelBlocker/Assets.xcassets/Contents.json
+          echo '{"images":[{"filename":"icon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > "$ICON/Contents.json"
+          python3 scripts/make_icon.py "$ICON/icon.png"
+
       - name: Generate Xcode project
         run: |
           brew install xcodegen
