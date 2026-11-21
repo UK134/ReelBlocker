@@ -6,9 +6,13 @@ struct BlockingWebView: UIViewRepresentable {
     let platform: Platform
     let settings: BlockerSettings
 
-    // Instagram/YouTube serve a worse site to unknown browsers, so pretend to be mobile Safari.
-    private static let safariUserAgent =
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+    // Look exactly like Safari on THIS phone's iOS version. A mismatched user agent
+    // (e.g. claiming iOS 18 on an iOS 17 phone) makes Instagram's login reject us.
+    private static var safariSuffix: String {
+        let parts = UIDevice.current.systemVersion.split(separator: ".")
+        let version = parts.prefix(2).joined(separator: ".")
+        return "Version/\(version) Mobile/15E148 Safari/604.1"
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(platform: platform, settings: settings)
@@ -19,6 +23,8 @@ struct BlockingWebView: UIViewRepresentable {
         config.websiteDataStore = .default()              // keeps you logged in between launches
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = .all  // no autoplay
+        config.applicationNameForUserAgent = Self.safariSuffix  // real WebKit UA + Safari suffix
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
         let script = WKUserScript(
             source: platform.blockerScript(settings: settings),
@@ -28,7 +34,6 @@ struct BlockingWebView: UIViewRepresentable {
         config.userContentController.addUserScript(script)
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.customUserAgent = Self.safariUserAgent
         webView.allowsBackForwardNavigationGestures = true  // swipe to go back
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
@@ -74,15 +79,24 @@ struct BlockingWebView: UIViewRepresentable {
             webView.load(URLRequest(url: safeURL))
         }
 
-        // Links that try to open a new tab load in the same view instead.
+        // Login flows (Facebook, Google, security checks) open real popup windows that talk
+        // back to the page that opened them. Show them as a layer on top, then remove on close.
         func webView(_ webView: WKWebView,
                      createWebViewWith configuration: WKWebViewConfiguration,
                      for navigationAction: WKNavigationAction,
                      windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if navigationAction.targetFrame == nil {
-                webView.load(navigationAction.request)
+            let popup = WKWebView(frame: webView.bounds, configuration: configuration)
+            popup.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            popup.navigationDelegate = self
+            popup.uiDelegate = self
+            webView.addSubview(popup)
+            return popup
+        }
+
+        func webViewDidClose(_ webView: WKWebView) {
+            if webView !== self.webView {
+                webView.removeFromSuperview()
             }
-            return nil
         }
     }
 }
